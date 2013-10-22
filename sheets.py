@@ -19,47 +19,63 @@ class Sheet(object):
     """
     The main class.
     """
-    def __init__(self, row_cls, filepath):
+    def __init__(self, row_cls, filepath, csvkwargs=None):
+        """
+        :param csvkwargs: the keyword arguments passed to csv builtin func
+        """
         self.row_cls = row_cls
         self.filepath = filepath
+        self.csvkwargs = csvkwargs
+        self.status = None
+        self.fileobj = None
+
+    def set_status(self, status):
+        """Set the current working status"""
+        self.status = status
+        if status == 'read':
+            self.fileobj = open(self.filepath, 'rb')
+            self.ioer = Reader(self.row_cls, self.fileobj, self.csvkwargs)
+        elif status == 'write':
+            self.fileobj = open(self.filepath, 'wb')
+            self.ioer = Writer(self.row_cls, self.fileobj, self.csvkwargs)
+        elif status == 'append':
+            self.fileobj = open(self.filepath, 'ab')
+            self.ioer = Writer(self.row_cls, self.fileobj, self.csvkwargs)
 
     def read(self):
-        file = open(self.filepath, 'rb')
-        return Reader(self.row_cls, file)
+        self.set_status('read')
+        return self.ioer
 
     def write(self, rows):
-        need_header = False
-        if os.path.exists(self.filepath):
-            need_header = True
-        with open(self.filepath, 'wb') as f:
-            writer = csv.writer(f)
-            if need_header:
-                titles = [column.title for column in self.row_cls._columns]
-                writer.writerow(titles)
-            try:
-                iterator = iter(rows)
-            except TypeError:
-                values = [getattr(rows, column.name) for column in \
-                    self.row_cls._columns]
-                writer.writerow(values)
-            else:
-                for row in rows:
-                    values = [getattr(row, column.name) for column in \
-                        self.row_cls._columns]
-                    writer.writerow(values)
+        self.set_status('write')
+        if self.csvkwargs:
+            writer = csv.writer(self.fileobj, **csvkwargs)
+        else:
+            writer = csv.writer(self.fileobj)
+        titles = [column.title for column in self.row_cls._columns]
+        writer.writerow(titles)
+        self.ioer.writerows(rows)
+        self.close()
 
-    def append(self):
-        pass
+    def append(self, rows):
+        self.set_status('append')
+        self.ioer.writerows(rows)
+        self.close()
+
+    def close(self):
+        if self.fileobj: self.fileobj.close()
 
 
 class Reader(object):
     """
     Itertor for CSV Reading
     """
-    def __init__(self, row_cls, file):
+    def __init__(self, row_cls, fileobj, csvkwargs):
         self.row_cls = row_cls
-        self.file = file
-        self.reader = csv.reader(self.file)
+        if csvkwargs:
+            self.reader = csv.reader(fileobj, **csvkwargs)
+        else:
+            self.reader = csv.reader(fileobj)
         self.reader.next()
 
     def __iter__(self):
@@ -68,6 +84,31 @@ class Reader(object):
     def next(self):
         return self.row_cls(*self.reader.next())
 
+
+class Writer(object):
+    """
+    CSV Write Logic
+    """
+    def __init__(self, row_cls, fileobj, csvkwargs):
+        self.row_cls = row_cls
+        if csvkwargs:
+            self.writer = csv.writer(fileobj, **csvkwargs)
+        else:
+            self.writer = csv.writer(fileobj)
+    
+    def writerow(self, row):
+        values = [getattr(row, column.name) for column in \
+            self.row_cls._columns]
+        self.writer.writerow(values)
+
+    def writerows(self, rows):
+        try:
+            iterator = iter(rows)
+        except TypeError:
+            self.writerow(rows)
+        else:
+            for row in rows:
+                self.writerow(row)
 
 class Column(object):
     """
@@ -164,23 +205,29 @@ class DateColumn(Column):
 if __name__ == '__main__':
     class Person(Row):
         name = StringColumn()
-        age = IntegerColumn(title='agetitle')
+        age = IntegerColumn(title='年龄')
         birthday = DateColumn()
 
 
     filepath = './sheets.csv'
+    csvkwargs = {'delimiter':':'}
 
 
-    sheet = Sheet(Person, filepath)
-    person = Person('fsp', 22, '1991-06-23')
+    person = Person('冯巩', 22, '1991-06-23')
     persons = []
     persons.append(Person('fsp2', 23, datetime.datetime.now()))
-    persons.append(Person('fsp3', 24, '1991-06-23'))
+    persons.append(Person('fsp:3', 24, '1991-06-23'))
     persons.append(Person('fsp4', 25, '1991-06-23'))
+
+
+    sheet = Sheet(Person, filepath, csvkwargs)
     sheet.write(person)
     sheet.write(persons)
+    sheet.append(persons)
+    sheet.append(person)
 
 
     for p in sheet.read():
         print (p, p.name, p.age, p.birthday)
+    sheet.close()
 
