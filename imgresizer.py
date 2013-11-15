@@ -10,6 +10,7 @@
     :copyright: (c) 2013 by fsp.
     :license: BSD.
 """
+# bug open when create more than 3000 files, missing 2/3
 
 import sys
 import os
